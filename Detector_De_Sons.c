@@ -14,59 +14,48 @@ const uint I2C_SCL = 15;
 const uint MIC_PIN = 28;    
 const uint BUTTON_A_PIN = 5;  
 const uint BUTTON_B_PIN = 6;  
-const uint LED_RED_PIN = 10;  
-const uint LED_GREEN_PIN = 11;
-const uint LED_BLUE_PIN = 12;
-const uint BUZZER_PIN = 13; 
+const uint LED_RED_PIN = 13;  
+const uint LED_GREEN_PIN = 11; 
+const uint LED_BLUE_PIN = 12; 
+const uint BUZZER_PIN = 10; 
 
 // Configurações do ADC para detecção de som
 const float SOUND_OFFSET = 1.65;
-const float SOUND_THRESHOLD = 1.0;
+const float SILENCE_THRESHOLD = 0.3;  // Limite para o silêncio
+const float ATTENTION_THRESHOLD = 1.0;  // Limite para a atenção
+const float ALARM_THRESHOLD = 1.6;  // Limite para o alarme
 const float ADC_REF = 3.3;        
 const int ADC_RES = 4095;          
 
 // Estado do sistema
 bool system_active = false;
-int sound_count = 0;
+int sound_count = 0;  // Contador de sons altos
 bool alarm_active = false;
+
+// Função para atualizar as cores dos LEDs
+void set_led_color(bool R, bool G, bool B) {
+    gpio_put(LED_RED_PIN, R);   // Configura o estado do LED vermelho
+    gpio_put(LED_GREEN_PIN, G); // Configura o estado do LED verde
+    gpio_put(LED_BLUE_PIN, B);  // Configura o estado do LED azul
+}
 
 // Configuração dos LEDs de estado
 void configure_leds() {
     gpio_init(LED_RED_PIN);
     gpio_set_dir(LED_RED_PIN, GPIO_OUT);
-    gpio_put(LED_RED_PIN, 0);
 
     gpio_init(LED_GREEN_PIN);
     gpio_set_dir(LED_GREEN_PIN, GPIO_OUT);
-    gpio_put(LED_GREEN_PIN, 0);
 
     gpio_init(LED_BLUE_PIN);
     gpio_set_dir(LED_BLUE_PIN, GPIO_OUT);
-    gpio_put(LED_BLUE_PIN, 1);
 
     gpio_init(BUZZER_PIN); 
     gpio_set_dir(BUZZER_PIN, GPIO_OUT);
     gpio_put(BUZZER_PIN, 0);
-}
 
-// Estado dos LEDs
-void update_led_status(bool active, bool sound_detected) {
-    if (!active) {
-        gpio_put(LED_RED_PIN, 0);  
-        gpio_put(LED_GREEN_PIN, 0);
-        gpio_put(LED_BLUE_PIN, 1);
-        gpio_put(BUZZER_PIN, 0); 
-    } else if (sound_detected) {
-        gpio_put(LED_RED_PIN, 1);  
-        gpio_put(LED_GREEN_PIN, 0);
-        gpio_put(LED_BLUE_PIN, 0);  
-        gpio_put(BUZZER_PIN, 1); 
-    } else {
-        gpio_put(LED_RED_PIN, 0);  
-        gpio_put(LED_GREEN_PIN, 1);
-        gpio_put(LED_BLUE_PIN, 0);  
-        gpio_put(BUZZER_PIN, 0); 
-    }
+    // Inicializa os LEDs como apagados
+    set_led_color(0, 0, 0);
 }
 
 // Função para emitir som no buzzer
@@ -80,7 +69,6 @@ void sound_alarm(uint duration_ms) {
         sleep_ms(500); 
     }
 }
-
 
 // Função para tocar uma melodia
 void play_melody() {
@@ -143,7 +131,7 @@ int main() {
         // botão A
         if (gpio_get(BUTTON_A_PIN) == 0) {
             system_active = true;
-            update_led_status(true, false);
+            set_led_color(0, 1, 0);  // Luz verde ao ativar
             ssd1306_draw_string(ssd, 0, 16, "Sistema ativado    ");
             render_on_display(ssd, &frame_area);
             sleep_ms(200);
@@ -152,8 +140,13 @@ int main() {
         // botão B
         if (gpio_get(BUTTON_B_PIN) == 0) {
             system_active = false;
-            update_led_status(false, false);
+            set_led_color(0, 0, 0);  // Desliga todas as luzes
+
+            // Exibe o número de sons altos detectados
+            char buffer[32];
+            snprintf(buffer, sizeof(buffer), "Sons altos: %d", sound_count);
             ssd1306_draw_string(ssd, 0, 16, "Sistema desativado ");
+            ssd1306_draw_string(ssd, 0, 32, buffer); 
             render_on_display(ssd, &frame_area);
             sleep_ms(200);
         }
@@ -164,28 +157,34 @@ int main() {
             float voltage = (raw_adc * ADC_REF) / ADC_RES;
             float sound_level = fabs(voltage - SOUND_OFFSET);
 
-            if (sound_level > SOUND_THRESHOLD) {
-                sound_count++;
-                update_led_status(true, true);
-                ssd1306_draw_string(ssd, 0, 32, "Som detectado!");
-               
-                // Exibe o número de sons detectados
-                char buffer[32];
-                snprintf(buffer, sizeof(buffer), "Total: %d", sound_count);
-                ssd1306_draw_string(ssd, 0, 48, buffer);
+            if (sound_level < SILENCE_THRESHOLD) {
+                // Silêncio - Luz verde
+                set_led_color(0, 1, 0);  // Verde
+                ssd1306_draw_string(ssd, 0, 32, "                ");  // Limpa a mensagem de atenção
                 render_on_display(ssd, &frame_area);
+            } else if (sound_level >= SILENCE_THRESHOLD && sound_level < ALARM_THRESHOLD) {
+                // Atenção - Luz amarela
+                set_led_color(1, 1, 0);  // Amarelo
+                ssd1306_draw_string(ssd, 0, 32, "Atencao          ");
+                render_on_display(ssd, &frame_area);
+            } else if (sound_level >= ALARM_THRESHOLD) {
+                // Alarme - Luz vermelha
+                set_led_color(1, 0, 0);  // Vermelho
+                ssd1306_draw_string(ssd, 0, 32, "Alarme!          ");
+                render_on_display(ssd, &frame_area);
+
+                // Incrementa o contador de sons altos
+                sound_count++;
 
                 // Emite o alarme
                 sound_alarm(5000);
                 play_melody();
-            } else {
-                update_led_status(true, false);
             }
         } else {
-            update_led_status(false, false);
+            set_led_color(0, 0, 0);  // Desliga todas as luzes
         }
 
-        sleep_ms(100);
+        sleep_ms(500);
     }
 
     return 0;
